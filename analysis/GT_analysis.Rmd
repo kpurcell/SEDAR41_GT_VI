@@ -1,0 +1,802 @@
+
+
+gray triggerfish Video Index Using ZINB
+========
+
+This analysis generates a gray triggerfish video index using a zero-inflated Negative Binomial and Poisson model structure as implemented in the R package pscl.
+
+```{r setup, echo=FALSE,message=FALSE, warning=FALSE, error=FALSE}
+rm(list=ls(all=TRUE)) 
+graphics.off()
+#windows(record=T)
+#setwd ("\\\\CCFHR-S-1534090\\popdyn1\\SEDAR\\SEDAR 41\\SEFISIndices\\S41RGIT")
+library(MASS)
+library(doBy)
+library(statmod)
+library(Hmisc)
+library(pscl)
+library(lmtest)
+library(stargazer)
+
+```
+
+
+
+```{r ReadData, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE}
+# Read in gray triggerfish Data
+# This is the updated file from Nate
+raw=read.csv("C:\\Users\\Kevin.Purcell\\Documents\\GitHub\\SEDAR41_GT_VI\\data\\graytriggerfish_SEDAR41_2015v2.csv")
+names(raw)
+summary(raw)
+
+```
+
+
+
+```{r mungingData, echo=FALSE, message=FALSE, warning=FALSE}
+gt<-raw
+# Full data subsetting: 
+gt <- gt[gt$Station_Type!="Recon",]                # remove recon stations
+gt <- gt[gt$A.Video.Readable == "Yes",]         # remove invalid videos
+gt <- subset(gt, gt$Start_Depth > 0)                  # remove NA in depth
+gt <- subset(gt, gt$Start_Depth < 100)              # remove < 100 m deep
+gt <- subset(gt, gt$LastOfTemp > 0)                 # remove blank water temps
+gt <- subset(gt, gt$Turbidity != "Unknown")    # remove unknown turbidity values
+gt <- subset(gt, gt$No.Readable.Frames ==41)    # remove zero readable frames
+gt <- subset(gt, gt$Substrate !='Unknown')    # remove Substrate with unknowns
+gt <- subset(gt, gt$Biotic_Density !='Unknown')    # remove biotic density with unknowns
+gt <- subset(gt, gt$Year > 2010)    # remove 2010 samples as per workshop rec
+
+names(gt)
+length(gt$MeanCount)
+
+
+#make the Substrate_Cat
+temp=rep(NA,length(gt$Substrate))
+temp[gt$Substrate=='Unknown']='Unknown'
+gt$Substrate[gt$Substrate=='Unknown']=NA
+gt$Substrate=as.numeric(levels(gt$Substrate)[gt$Substrate])
+temp[gt$Substrate==0]='None'
+temp[gt$Substrate>0 & gt$Substrate<10]='Low'
+temp[gt$Substrate>=10 & gt$Substrate<40]='Moderate'
+temp[gt$Substrate>=40]='High'
+gt=cbind(gt,temp)
+names(gt)=c(names(gt)[-dim(gt)[2]],'Substrate_Cat')
+
+#make the Biotic_Density_Cat
+temp=rep(NA,length(gt$Biotic_Density))
+temp[gt$Biotic_Density=='Unknown']='Unknown'
+gt$Biotic_Density[gt$Biotic_Density=='Unknown']=NA
+gt$Biotic_Density=as.numeric(levels(gt$Biotic_Density)[gt$Biotic_Density])
+temp[gt$Biotic_Density==0]='None'
+temp[gt$Biotic_Density>0 & gt$Biotic_Density<10]='Low'
+temp[gt$Biotic_Density>=10 & gt$Biotic_Density<40]='Moderate'
+temp[gt$Biotic_Density>=40]='High'
+gt=cbind(gt,temp)
+names(gt)=c(names(gt)[-dim(gt)[2]],'Biotic_Density_Cat')
+
+#rename startTime
+
+names(gt)
+#Eliminate unnecessary columns
+dat=subset(gt,select=c(SumCount,No.Readable.Frames,Year,Turbidity,Current_Direction,
+                       Current_Magnitude,Substrate_Cat,Relief,Size,Biotic_Density_Cat,
+                       Biotic_Type,Biotic_Height,Start_Depth,Julian,Start_Latitude,
+                       LastOfTemp))
+
+orgnames=names(dat)
+
+
+
+# sumcount=round(dat$MeanCount*gt$No.Readable.Frames,0)
+# dat$MeanCount=sumcount
+
+
+
+#rename to short names
+names(dat)=c('SumCount','frames','y','wc','cd','cm','sc','sr','ss','bd','bt','bh','d','t','lat','temp')
+head(dat)
+
+#replace NA in the cpue with 0
+dat$SumCount[is.na(dat$SumCount)]=0
+
+# Table 1 data
+stargazer(dat, type='text')
+dat.2011<-subset(dat, dat$y==2011)
+stargazer(dat.2011, type='text')
+dat.2012<-subset(dat, dat$y==2012)
+stargazer(dat.2012, type='text')
+dat.2013<-subset(dat, dat$y==2013)
+stargazer(dat.2013, type='text')
+dat.2014<-subset(dat, dat$y==2014)
+stargazer(dat.2013, type='text')
+summaryBy(SumCount~y,data=dat,FUN=length)
+
+#rescale frames
+#dat$frames=dat$frames/41
+#dat$frames=log(dat$frames)
+```
+
+
+
+```{r EDA, echo=FALSE, error=FALSE, warning=FALSE, fig.align='center'}
+#now categorize the continuous variables
+
+# Figure for original continus variable distributions
+par(mfrow=c(2,2))
+## DEPTH
+hist(dat$d,breaks=seq(10,105,by=5),
+     main="Depth",
+     xlab="Depth (m)")
+## LATITUDE
+hist(dat$lat,breaks=seq(27,36,by=0.25),
+     main="Latitude",
+     xlab="Latitude (degrees)")
+## DAY OF YEAR (t)
+hist(dat$t,breaks=seq(110,305,by=5),
+     main="Day of the Year",
+     xlab="Julian Day")
+## WATER TEMP (temp)
+hist(dat$temp,breaks=seq(12.25,29.50,by=0.25),
+     main="Temperature",
+     xlab="Bottom Temperature (C)")
+
+
+## DEPTH
+hist(dat$d,breaks=seq(10,110,by=5))
+summary(dat$d)
+
+#temp=cut(dat$d,breaks=c(14,25,41,52,115),labels=FALSE)#;temp;table(temp)
+#temp=cut(dat$d,2,breaks=c(0,as.numeric(summary(dat$d))[-c(1,4)]),labels=FALSE);temp;table(temp)
+temp=cut(dat$d,2,breaks=quantile(dat$d),labels=FALSE)#;temp;table(temp)
+dat$d=temp
+summary(dat$d)
+
+## LATITUDE
+hist(dat$lat,breaks=seq(27,36,by=0.25))
+#hist(dat$lat[dat$y=='2010'],breaks=seq(27,36,by=0.25))
+hist(dat$lat[dat$y=='2011'],breaks=seq(27,36,by=0.25))
+hist(dat$lat[dat$y=='2012'],breaks=seq(27,36,by=0.25))
+hist(dat$lat[dat$y=='2013'],breaks=seq(27,36,by=0.25))
+summary(dat$lat)
+#temp=cut(dat$lat,breaks=c(27,29.75,31.25,32.75,34,35.25),labels=FALSE)#;temp;table(temp)
+#temp=cut(dat$lat,2,breaks=c(0,as.numeric(summary(dat$lat))[-c(1,4)]),labels=FALSE);temp;table(temp)
+#temp=cut(dat$lat,2,breaks=quantile(dat$lat),labels=FALSE)#;temp;table(temp)
+temp=cut(dat$lat,2,breaks=quantile(dat$lat),labels=FALSE)#;temp;table(temp)
+dat$lat=temp
+summary(dat$lat)
+hist(dat$lat)
+
+## DAY OF YEAR (t)
+hist(dat$t,breaks=seq(110,305,by=5))
+summary(dat$t)
+#temp=cut(dat$t,breaks=c(##,##,##,##,##,##),labels=FALSE)#;temp;table(temp)
+#temp=cut(dat$t,2,breaks=c(0,as.numeric(summary(dat$t))[-c(1,4)]),labels=FALSE);temp;table(temp)
+##temp=cut(dat$t,2,breaks=quantile(dat$t),labels=FALSE)#;temp;table(temp)
+temp=cut(dat$t,2,breaks=quantile(dat$t,probs=seq(0,1,0.125)),labels=FALSE)#;temp;table(temp)
+dat$t=temp
+summary(dat$t)
+hist(dat$t)
+
+## WATER TEMP (temp)
+summary(dat$temp)
+hist(dat$temp,breaks=seq(12.25,29.50,by=0.25))
+
+#temp=cut(dat$t,breaks=c(##,##,##,##,##,##),labels=FALSE)#;temp;table(temp)
+#temp=cut(dat$temp,2,breaks=c(0,as.numeric(summary(dat$temp))[-c(1,4)]),labels=FALSE);temp;table(temp)
+temp=cut(dat$temp,2,breaks=quantile(dat$temp),labels=FALSE)#;temp;table(temp)
+dat$temp=temp
+summary(dat$temp)
+hist(dat$temp)
+
+# ## TIME OF DAY (tod)
+# hist(dat$tod,breaks=seq(0.4,0.95,by=0.025))
+# summary(dat$tod)
+# #temp=cut(dat$tod,breaks=c(##,##,##,##,##,##),labels=FALSE)#;temp;table(temp)
+# #temp=cut(dat$tod,2,breaks=c(0,as.numeric(summary(dat$tod))[-c(1,4)]),labels=FALSE);temp;table(temp)
+# temp=cut(dat$tod,2,breaks=quantile(dat$tod),labels=FALSE)#;temp;table(temp)
+# dat$tod=temp
+
+
+#Factorize variables
+dat$y=factor(dat$y)
+dat$d=factor(dat$d)
+dat$lat=factor(dat$lat)
+dat$t=factor(dat$t)
+dat$temp=factor(dat$temp)
+# dat$tod=factor(dat$tod)
+
+#get rid of unused factors for dat$wc
+dat$wc=factor(dat$wc)
+dat$sc=factor(dat$sc)
+dat$bd=factor(dat$bd)
+
+plot.design(SumCount~y + wc + cd,data=dat)
+plot.design(SumCount~ sc + bd ,data=dat)
+plot.design(SumCount~d + t + lat + temp ,data=dat)
+
+```
+
+**So this bit evaluates the ZIP versus the ZINB **
+
+The ZINB is clearly preferred in the likelihood ratio test and fits the data better.  But you can see that neither model fit the data particularly well.
+
+
+```{r ZIP-ZINB, echo=T,message=T, warning=T, cache=TRUE}
+
+zipform=formula(SumCount~ y + wc + cd + sc + bd + d + t + lat + temp |y + wc + cd + sc + bd + d + t + lat + temp )
+#zipform=formula(SumCount~ y + wc + cd + sc + bd + d + t + lat + temp |y  )
+#zipform=formula(SumCount~ y + wc + cd + sc + bd + d + t + lat + temp |1.  )
+zipmod=zeroinfl(zipform,  dist = "poisson", link = "logit",data=dat);summary(zipmod)
+
+nbform=formula(SumCount~ y + wc + cd + sc + bd + d + t + lat + temp |y + wc + cd + sc + bd + d + t + lat + temp )
+#nbform=formula(SumCount~ y + wc + cd + sc + bd + d + t + lat + temp |y )
+#nbform=formula(SumCount~ y + wc + cd + sc + bd + d + t + lat + temp |1. )
+nbmod=zeroinfl(nbform,  dist = "negbin", link = "logit",data=dat);summary(nbmod)
+
+PvNP<-lrtest(zipmod,nbmod)
+
+stargazer(zipmod,nbmod, type="text", 
+          title="Zero-Inflated Poisson versus Negative Binomial Models",
+          align=TRUE,
+          column.labels=c("ZIP", "ZINB"),
+          single.row=T,
+          model.numbers=F)
+
+
+```
+
+
+```{r modComp, echo=FALSE,warning=FALSE,error=FALSE}
+
+#windows(width=8,height=6,record=T)
+resids=residuals(zipmod)
+#cbind(fitted(zipmod),dat$SumCount,fitted(zipmod)-dat$SumCount,resids)
+plot(fitted(zipmod),resids)
+plot(dat$y,resids,xlab="Year",main="Residuals (zipmod)")
+plot(dat$wc,resids,xlab="Water Clarity",main="Residuals (zipmod)")
+plot(dat$cd,resids,xlab="Current Direction",main="Residuals (zipmod)")
+plot(dat$bd,resids,xlab="Biotic Diversity",main="Residuals (zipmod)")
+plot(dat$lat,resids,xlab="Latitude",main="Residuals (zipmod)")
+
+plot(dat$SumCount,fitted(zipmod))
+
+hist(dat$SumCount,breaks=0:max(dat$SumCount),freq=T,right=TRUE,xlab='Aggregate Fish Counted', main='ZIP')  
+d=hist(predict(zipmod),breaks=0:max(dat$SumCount),plot=FALSE)
+lines(seq(0.5,max(dat$SumCount),by=1),d$counts, col="blue",type='l')      
+hist(dat$SumCount,breaks=0:max(dat$SumCount),freq=T,right=TRUE,xlab='Aggregate Fish Counted', main='ZIP',ylim=c(0,50))  
+lines(seq(0.5,max(dat$SumCount),by=1),d$counts, col="blue",type='b')      
+
+
+#windows(width=8,height=6,record=T)
+resids=residuals(nbmod)
+#cbind(fitted(nbmod),dat$SumCount,fitted(nbmod)-dat$SumCount,resids)
+plot(fitted(nbmod),resids)
+plot(dat$SumCount,fitted(nbmod))
+
+plot(dat$y,resids,xlab="Year",main="Residuals (nbmod)")
+plot(dat$wc,resids,xlab="Water Clarity",main="Residuals (nbmod)")
+plot(dat$cd,resids,xlab="Current Direction",main="Residuals (nbmod)")
+plot(dat$bd,resids,xlab="Biotic Diversity",main="Residuals (nbmod)")
+plot(dat$lat,resids,xlab="Latitude",main="Residuals (nbmod)")
+
+hist(dat$SumCount,breaks=0:max(dat$SumCount),freq=T,right=TRUE,xlab='Aggregate Fish Counted', main='NB')  
+d2=hist(predict(nbmod),breaks=0:max(dat$SumCount),plot=FALSE)
+lines(seq(0.5,max(dat$SumCount),by=1),d2$counts, col="blue",type='l')      
+hist(dat$SumCount,breaks=0:max(dat$SumCount),freq=T,right=TRUE,xlab='Aggregate Fish Counted', main='NB',ylim=c(0,50))  
+lines(seq(0.5,max(dat$SumCount),by=1),d2$counts, col="blue",type='b')      
+
+plot(dat$SumCount,fitted(nbmod))
+points(dat$SumCount,fitted(zipmod),col='red',pch=19)
+
+par(mfrow=c(1,2))
+hist(dat$SumCount,breaks=0:max(dat$SumCount),freq=T,right=TRUE,xlab='SumCount', main='ZIP',ylim=c(0,50), xlim=c(0,60))  
+d=hist(predict(zipmod),breaks=0:max(dat$SumCount),plot=FALSE)
+lines(seq(0.5,max(dat$SumCount),by=1),d$counts, col="blue",type='b') 
+  
+hist(dat$SumCount,breaks=0:max(dat$SumCount),freq=T,right=TRUE,xlab='SumCount', main='ZINB',ylim=c(0,50),xlim=c(0,60))  
+d2=hist(predict(nbmod),breaks=0:max(dat$SumCount),plot=FALSE)
+lines(seq(0.5,max(dat$SumCount),by=1),d2$counts, col="blue",type='b')   
+
+
+```
+
+
+**So this bit allows variable selection within the ZINB**
+
+```{r ZINB VarSel, echo=FALSE,message=T, warning=T, cache=TRUE}
+# NULL MODEL FORM
+#nbform=formula(SumCount~ y + wc + cd + sc + bd + d + t + lat + temp |y + wc + cd + sc + bd + d + t + lat + temp )
+
+###Remove water clarity and current variables from mean
+nbform1=formula(SumCount~ y  + cd + sc + bd + d + t + lat + temp |y + wc + cd + sc + bd + d + t + lat + temp )
+nbmod1=zeroinfl(nbform1,  dist = "negbin", link = "logit",data=dat);summary(nbmod1)
+
+nbform2=formula(SumCount~ y  + wc + sc + bd + d + t + lat + temp |y + wc + cd + sc + bd + d + t + lat + temp )
+nbmod2=zeroinfl(nbform2,  dist = "negbin", link = "logit",data=dat);summary(nbmod2)
+
+###Remove benthic variables from mean
+nbform3=formula(SumCount~ y + wc + cd + bd + d + t + lat + temp |y + wc + cd + sc + bd + d + t + lat + temp )
+nbmod3=zeroinfl(nbform3,  dist = "negbin", link = "logit",data=dat);summary(nbmod3)
+
+nbform4=formula(SumCount~ y + wc + cd + sc + d + t + lat + temp |y + wc + cd + sc + bd + d + t + lat + temp )
+nbmod4=zeroinfl(nbform4,  dist = "negbin", link = "logit",data=dat);summary(nbmod4)
+
+###Remove depth from mean
+nbform5=formula(SumCount~ y + wc + cd + sc + bd + t + lat + temp |y + wc + cd + sc + bd + d + t + lat + temp)
+nbmod5=zeroinfl(nbform5,  dist = "negbin", link = "logit",data=dat);summary(nbmod5)
+
+#### Remove Season From mean 
+nbform6=formula(SumCount~ y + wc + cd + sc + bd + d + lat + temp |y + wc + cd + sc + bd + d + t + lat + temp)
+nbmod6=zeroinfl(nbform6,  dist = "negbin", link = "logit",data=dat);summary(nbmod6)
+
+#### Remove Latitude From mean 
+nbform7=formula(SumCount~ y + wc + cd + sc + bd + d + t + temp |y + wc + cd + sc + bd + d + t + lat + temp)
+nbmod7=zeroinfl(nbform7,  dist = "negbin", link = "logit",data=dat);summary(nbmod7)
+
+#### Remove Temperature From mean 
+nbform8=formula(SumCount~ y + wc + cd + sc + bd + d + t + lat  |y + wc + cd + sc + bd + d + t + lat + temp)
+nbmod8=zeroinfl(nbform8,  dist = "negbin", link = "logit",data=dat);summary(nbmod8)
+
+#### Remove year From mean 
+nbform9=formula(SumCount~ wc + cd + sc + bd + d + t + lat + temp  |y + wc + cd + sc + bd + d + t + lat + temp)
+nbmod9=zeroinfl(nbform9,  dist = "negbin", link = "logit",data=dat);summary(nbmod9)
+
+lrtest(nbmod1,nbmod)
+lrtest(nbmod2,nbmod)
+lrtest(nbmod3,nbmod)
+lrtest(nbmod4,nbmod)
+lrtest(nbmod5,nbmod)
+lrtest(nbmod6,nbmod)
+lrtest(nbmod7,nbmod)
+lrtest(nbmod8,nbmod)
+lrtest(nbmod9,nbmod)
+
+AIC(nbmod,nbmod1,nbmod2,nbmod3,nbmod4,
+    nbmod5,nbmod6,nbmod7,nbmod8,nbmod9)
+
+AIC(nbmod)-AIC(nbmod1)
+AIC(nbmod)-AIC(nbmod2)
+AIC(nbmod)-AIC(nbmod3)
+AIC(nbmod)-AIC(nbmod4)
+AIC(nbmod)-AIC(nbmod5)
+AIC(nbmod)-AIC(nbmod6)
+AIC(nbmod)-AIC(nbmod7)
+AIC(nbmod)-AIC(nbmod8)
+
+
+
+# nbmod is the best performing so step down to it
+
+# NULL MODEL FORM
+#nbform=formula(SumCount~ y + wc + cd + sc + bd + d + t + lat + temp |y + wc + cd + sc + bd + d + t + lat + temp )
+
+###Remove water clarity and current variables from mean
+nbform3a=formula(SumCount~ y + cd + bd + d + t + lat + temp |y + wc + cd + sc + bd + d + t + lat + temp)
+nbmod9=zeroinfl(nbform3a,  dist = "negbin", link = "logit",data=dat)
+summary(nbmod9)
+
+nbform3b=formula(SumCount~ y + wc + bd + d + t + lat + temp |y + wc + cd + sc + bd + d + t + lat + temp)
+nbmod10=zeroinfl(nbform3b,  dist = "negbin", link = "logit",data=dat)
+summary(nbmod10)
+
+###Remove benthic variables from mean
+nbform3c=formula(SumCount~ y + wc + cd + d + t + lat + temp |y + wc + cd + sc + bd + d + t + lat + temp)
+nbmod11=zeroinfl(nbform3c,  dist = "negbin", link = "logit",data=dat)
+summary(nbmod11)
+
+nbform3d=formula(SumCount~ y + wc + cd + bd + t + lat + temp |y + wc + cd + sc + bd + d + t + lat + temp)
+nbmod12=zeroinfl(nbform3d,  dist = "negbin", link = "logit",data=dat)
+summary(nbmod12)
+
+###Remove depth from mean
+nbform3e=formula(SumCount~ y + wc + cd + bd + d + lat + temp |y + wc + cd + sc + bd + d + t + lat + temp)
+nbmod13=zeroinfl(nbform3e,  dist = "negbin", link = "logit",data=dat)
+summary(nbmod13)
+
+#### Remove Latitude From mean 
+nbform3f=formula(SumCount~ y + wc + cd + bd + d + t +  temp |y + wc + cd + sc + bd + d + t + lat + temp)
+nbmod14=zeroinfl(nbform3f,  dist = "negbin", link = "logit",data=dat)
+summary(nbmod14)
+
+#### Remove Temperature From mean 
+nbform3g=formula(SumCount~ y + wc + cd + bd + d + t + lat |y + wc + cd + sc + bd + d + t + lat + temp)
+nbmod15=zeroinfl(nbform3g,  dist = "negbin", link = "logit",data=dat)
+summary(nbmod15)
+
+lrtest(nbmod9,nbmod3)
+lrtest(nbmod10,nbmod3)
+lrtest(nbmod11,nbmod3)
+lrtest(nbmod12,nbmod3)
+lrtest(nbmod13,nbmod3)
+lrtest(nbmod14,nbmod3)
+lrtest(nbmod15,nbmod3)
+AIC(nbmod9)
+AIC(nbmod10)
+AIC(nbmod11)
+AIC(nbmod12)
+AIC(nbmod13)
+AIC(nbmod14)
+AIC(nbmod15)
+
+AIC(nbmod3)-AIC(nbmod9)
+AIC(nbmod3)-AIC(nbmod10)
+AIC(nbmod3)-AIC(nbmod11)
+AIC(nbmod3)-AIC(nbmod12)
+AIC(nbmod3)-AIC(nbmod13)
+AIC(nbmod3)-AIC(nbmod14)
+AIC(nbmod3)-AIC(nbmod15)
+
+## nbmod3 needs no further removals from mean
+
+
+# Model 3 is the best performing for the positive part of the model
+#nbform3=formula(SumCount~ y + wc + cd + bd + d + t + lat + temp |y + wc + cd + sc + bd + d + t + lat + temp )
+##Now conduct variable selection on the binomial part
+### Remove year
+nbform3log1=formula(SumCount~ y + wc + cd + bd + d + t + lat + temp | wc + cd + sc + bd + d + t + lat + temp )
+nbmod16=zeroinfl(nbform3log1,  dist = "negbin", link = "logit",data=dat);summary(nbmod16)
+
+###Remove wc from mean
+nbform3log2=formula(SumCount~ y + wc + cd + bd + d + t + lat + temp |y +  cd + sc + bd + d + t + lat + temp )
+nbmod17=zeroinfl(nbform3log2,  dist = "negbin", link = "logit",data=dat);summary(nbmod17)
+
+###Remove current direction  from mean
+nbform3log3=formula(SumCount~ y + wc + cd + bd + d + t + lat + temp |y + wc +  sc + bd + d + t + lat + temp )
+nbmod18=zeroinfl(nbform3log3,  dist = "negbin", link = "logit",data=dat);summary(nbmod18)
+
+## Remove substrat cat
+nbform3log4=formula(SumCount~ y + wc + cd + bd + d + t + lat + temp |y + wc + cd + bd + d + t + lat + temp )
+nbmod19=zeroinfl(nbform3log4,  dist = "negbin", link = "logit",data=dat);summary(nbmod19)
+
+###Remove benthic variables from mean
+nbform3log5=formula(SumCount~ y + wc + cd + bd + d + t + lat + temp |y + wc + cd + sc + d + t + lat + temp )
+nbmod20=zeroinfl(nbform3log5,  dist = "negbin", link = "logit",data=dat);summary(nbmod20)
+
+## Remove depth
+nbform3log6=formula(SumCount~ y + wc + cd + bd + d + t + lat + temp |y + wc + cd + sc + bd + t  + lat + temp )
+nbmod21=zeroinfl(nbform3log6,  dist = "negbin", link = "logit",data=dat);summary(nbmod21)
+
+###Remove julian day
+nbform3log7=formula(SumCount~ y + wc + cd + bd + d + t + lat + temp |y + wc + cd + sc + bd + d + lat  + temp )
+nbmod22=zeroinfl(nbform3log7,  dist = "negbin", link = "logit",data=dat);summary(nbmod22)
+
+#### Remove Latitude 
+nbform3log8=formula(SumCount~ y + wc + cd + bd + d + t + lat + temp |y + wc + cd + sc + bd + d + t + temp  )
+nbmod23=zeroinfl(nbform3log8,  dist = "negbin", link = "logit",data=dat);summary(nbmod23)
+
+## Remove temp
+nbform3log9=formula(SumCount~ y + wc + cd + bd + d + t + lat + temp |y + wc + cd + sc + bd + d + t + lat  )
+nbmod24=zeroinfl(nbform3log9,  dist = "negbin", link = "logit",data=dat);summary(nbmod24)
+
+
+
+
+lrtest(nbmod16,nbmod3)
+lrtest(nbmod17,nbmod3)
+lrtest(nbmod18,nbmod3)
+lrtest(nbmod19,nbmod3)
+lrtest(nbmod20,nbmod3)
+lrtest(nbmod21,nbmod3)
+lrtest(nbmod22,nbmod3)
+lrtest(nbmod23,nbmod3)
+lrtest(nbmod24,nbmod3)
+AIC(nbmod16)
+AIC(nbmod17)
+AIC(nbmod18)
+AIC(nbmod19)
+AIC(nbmod20)
+AIC(nbmod21)
+AIC(nbmod22)
+AIC(nbmod23)
+AIC(nbmod24)
+AIC(nbmod3)-AIC(nbmod16)
+AIC(nbmod3)-AIC(nbmod17)
+AIC(nbmod3)-AIC(nbmod18)
+AIC(nbmod3)-AIC(nbmod19)
+AIC(nbmod3)-AIC(nbmod20)
+AIC(nbmod3)-AIC(nbmod21)
+AIC(nbmod3)-AIC(nbmod22)
+AIC(nbmod3)-AIC(nbmod23)
+AIC(nbmod3)-AIC(nbmod24)
+
+## nmmod16 (drop year from binomial) has the lowest AIC and highest sig lrtest so 
+## start with that and try dropping others in the binomial
+
+
+
+# Model 2 is the best performing for the binomial part of the model
+###Remove year from mean                                              
+nbform3log10=formula(SumCount~ y + wc + cd + bd + d + t + lat + temp | cd + sc + bd + d + t + lat + temp)
+nbmod25=zeroinfl(nbform3log10,  dist = "negbin", link = "logit",data=dat);summary(nbmod25)
+
+###Remove current variables from mean
+nbform3log11=formula(SumCount~ y + wc + cd + bd + d + t + lat + temp | wc + sc + bd + d + t + lat + temp)
+nbmod26=zeroinfl(nbform3log11,  dist = "negbin", link = "logit",data=dat);summary(nbmod26)
+
+###Remove benthic variables from mean
+nbform3log12=formula(SumCount~ y + wc + cd + bd + d + t + lat + temp | wc + cd + bd + d + t + lat + temp)
+nbmod27=zeroinfl(nbform3log12,  dist = "negbin", link = "logit",data=dat);summary(nbmod27)
+
+nbform3log13=formula(SumCount~ y + wc + cd + bd + d + t + lat + temp | wc + cd + sc + d + t + lat + temp)
+nbmod28=zeroinfl(nbform3log13,  dist = "negbin", link = "logit",data=dat);summary(nbmod28)
+
+###Remove depth from mean
+nbform3log14=formula(SumCount~ y + wc + cd + bd + d + t + lat + temp | wc + cd + sc + bd + t + lat + temp)
+nbmod29=zeroinfl(nbform3log14,  dist = "negbin", link = "logit",data=dat);summary(nbmod29)
+
+#### Remove Latitude From mean 
+nbform3log15=formula(SumCount~ y + wc + cd + bd + d + t + lat + temp | wc + cd + sc + bd + d + lat + temp)
+nbmod30=zeroinfl(nbform3log15,  dist = "negbin", link = "logit",data=dat);summary(nbmod30)
+
+#### Remove Temperature From mean 
+nbform3log16=formula(SumCount~ y + wc + cd + bd + d + t + lat + temp | wc + cd + sc + bd + d + t + temp)
+nbmod31=zeroinfl(nbform3log16,  dist = "negbin", link = "logit",data=dat);summary(nbmod31)
+
+#### Remove Temperature From mean 
+nbform3log17=formula(SumCount~ y + wc + cd + bd + d + t + lat + temp | wc + cd + sc + bd + d + t + lat )
+nbmod32=zeroinfl(nbform3log17,  dist = "negbin", link = "logit",data=dat);summary(nbmod32)
+
+
+lrtest(nbmod25,nbmod16)
+lrtest(nbmod26,nbmod16)
+lrtest(nbmod27,nbmod16)
+lrtest(nbmod28,nbmod16)
+lrtest(nbmod29,nbmod16)
+lrtest(nbmod30,nbmod16)
+lrtest(nbmod31,nbmod16)
+lrtest(nbmod32,nbmod16)
+AIC(nbmod25)
+AIC(nbmod26)
+AIC(nbmod27)
+AIC(nbmod28)
+AIC(nbmod29)
+AIC(nbmod30)
+AIC(nbmod31)
+AIC(nbmod32)
+AIC(nbmod16)-AIC(nbmod25)
+AIC(nbmod16)-AIC(nbmod26)
+AIC(nbmod16)-AIC(nbmod27)
+AIC(nbmod16)-AIC(nbmod28)
+AIC(nbmod16)-AIC(nbmod29)
+AIC(nbmod16)-AIC(nbmod30)
+AIC(nbmod16)-AIC(nbmod31)
+AIC(nbmod16)-AIC(nbmod32)
+
+
+###Best Model is nbmod25
+# SumCount~ y + wc + cd + bd + d + t + lat + temp | cd + sc + bd + d + t + lat + temp
+
+nbbest=nbmod25
+
+```
+
+The final model:
+nbmod25
+
+```{r ResidFitted, echo=FALSE, error=FALSE, warning=FALSE}
+
+#windows(width=8,height=6,record=T)
+resids=residuals(nbbest, type="pearson")
+
+#cbind(fitted(nbbest),dat$SumCount,fitted(nbbest)-dat$SumCount,resids)
+par(mfrow=c(1,2))
+plot(fitted(nbbest),resids, ylab="Pearsons Residuals", xlab="Fitted Values") #pearson resids vs fitted values
+plot(dat$SumCount,fitted(nbbest), ylab="Fitted Values", xlab="Original Values") #pearson values vs original data
+```
+
+
+```{r residVar, echo=FALSE, warning=FALSE, error=FALSE, fig.align='center'}
+
+# A single figure
+par(mfrow=c(2,2))
+plot(dat$y,resids,xlab="Year",main="Residuals (nbbest)")
+plot(dat$t,resids,xlab="Season",main="Residuals (nbbest)")
+plot(dat$lat,resids,xlab="Latitude",main="Residuals (nbbest)")
+
+par(mfrow=c(3,2))
+plot(dat$wc,resids,xlab="Water Clarity",main="Residuals (nbbest)")
+plot(dat$cd,resids,xlab="Current Direction",main="Residuals (nbbest)")
+plot(dat$sc,resids,xlab="Substrate Composition",main="Residuals (nbbest)")
+plot(dat$bd,resids,xlab="Biotic Diversity",main="Residuals (nbbest)")
+plot(dat$d,resids,xlab="Depth",main="Residuals (nbbest)")
+plot(dat$temp,resids,xlab="Temperature",main="Residuals (nbbest)")
+
+
+```
+
+
+```{r zinbFit, echo=FALSE, warning=FALSE, error=FALSE, fig.align='center'}
+# Model Fit figure
+par(mfrow=c(1,2))
+hist(dat$SumCount,
+     breaks=0:max(dat$SumCount),
+     freq=T,right=TRUE,
+     xlab='Sum Count',
+     col ="lightgray",
+     bor= "lightgray",
+     main='NB')  
+d3=hist(predict(nbbest),breaks=0:max(dat$SumCount),plot=FALSE)
+lines(seq(0.5,max(dat$SumCount),by=1),d3$counts, col="blue",type='l')      
+hist(dat$SumCount,
+     breaks=0:max(dat$SumCount),
+     freq=T,right=TRUE,
+     xlab='Sum Count', 
+     col = "gray",
+     bor="gray",
+     main='NB',
+     ylim=c(0,50), xlim=c(0, 100))  
+lines(seq(0.5,max(dat$SumCount),by=1),d3$counts, col="blue",type='l')      
+#lines(seq(0.5,max(dat$SumCount),by=1),d2$counts, col="red",type='l')      
+```
+
+
+```{r idkPlot, echo=FALSE, warning=FALSE, error=FALSE, fig.align='center'}
+
+#formula(SumCount~ y + wc + cd + bd + d + t + lat + temp | cd + sc + bd + d + t + lat + temp)
+new.dat=expand.grid(y=levels(dat$y),
+                    wc=levels(dat$wc),
+                    #cm=levels(dat$cm),
+                    cd=levels(dat$cd),
+                    sc=levels(dat$sc),
+                    bd=levels(dat$bd),
+                    #bt=levels(dat$bt),
+                    #bh=levels(dat$bh),
+                    d=levels(dat$d),
+                    t=levels(dat$t),
+                    lat=levels(dat$lat),
+                    temp=levels(dat$temp)
+                    #tod=levels(dat$tod),
+                    #frames=1)
+                    )
+
+new.dat=cbind(new.dat,predict(nbbest,new.dat))
+names(new.dat)[dim(new.dat)[2]]="Predicted"
+resvec=summaryBy(Predicted~y,data=new.dat,FUN=mean)[,2]
+index = resvec/mean(resvec)
+#index = resvec/max(resvec)
+
+plot(resvec,type='b',ylim=c(0,6))
+plot(index,type='b',ylim=c(0,2))
+```
+
+
+
+```{r bootStrap, cache=TRUE, echo=FALSE, error=FALSE, warning=FALSE}
+
+#set up data objects and specify number of bootstrap replications
+ptm <- proc.time()
+boots=5   #10000
+##formula(SumCount~ y + wc + cd + bd + d + t + lat + temp | cd + sc + bd + d + t + lat + temp)
+
+org.dat=dat[,c(1,3,4,5,7,10,13,15,16)];head(org.dat)
+boot.dat=org.dat
+numyrs=length(levels(org.dat$y));numyrs
+index.boot=matrix(NA,nrow=boots,ncol=numyrs)
+predmean.boot=index.boot
+yr.samp=summaryBy(SumCount~y,data=org.dat,FUN=length)[,2] #added a left side to Lew's code base
+
+#start bootstrap loop
+for(boot in 1:boots){
+  
+  #Get bootstrap data for current replicate
+  for(i in 1:numyrs){
+    yr.rows=org.dat$y==levels(org.dat$y)[i]
+    sub.dat=org.dat[yr.rows,]
+    yr.boot=round(runif(yr.samp[i],1,yr.samp[i]),0)
+    boot.dat[yr.rows,]=sub.dat[yr.boot,]
+  }
+  
+# Now Recalibrate 2010 Data 
+  cal.prop=0.61
+  table(boot.dat$y,boot.dat$SumCount)
+  dat.2010=boot.dat[boot.dat$y==2010,]
+  cal.SumCount=rep(NA,length(dat.2010$SumCount))
+  for(i in 1:length(dat.2010$SumCount)){cal.SumCount[i]=rbinom(1,dat.2010$SumCount[i],cal.prop)}#;plot(cal.SumCount,dat.2010$SumCount,xlim=c(0,250),ylim=c(0,250))
+  boot.dat[boot.dat$y==2010,1]= cal.SumCount 
+  
+  
+  #make a function to compute the index and return either a valid index or NA conditional on if the model converges
+  getindex=function(){
+    #define and fit model for current replicate.  Use the "try" function so that can continue to run if model does not converge
+    #on a particular replication  
+    f2 =formula(SumCount~ y + wc + cd + sc + bd + d + lat + temp |y + cd + sc + bd + d + lat + temp)
+    Nb2 = try(zeroinfl(f2, dist = "negbin", link = "logit", data = boot.dat)); Nb2
+    
+    #see if model converged, if it did, return the mean year effect over all covariate combinations
+    # If it did not converge, return an NA vector for the year effects
+    if (class(Nb2) != "try-error"){
+      #Predict the year effect (index) by predicting for each covariate level and compute the mean
+    new.dat=expand.grid(y=levels(dat$y),
+                    wc=levels(dat$wc),
+                    #cm=levels(dat$cm),
+                    cd=levels(dat$cd),
+                    sc=levels(dat$sc),
+                    bd=levels(dat$bd),
+                    #bt=levels(dat$bt),
+                    #bh=levels(dat$bh),
+                    d=levels(dat$d),
+                    t=levels(dat$t),
+                    lat=levels(dat$lat),
+                    temp=levels(dat$temp)
+                    #tod=levels(dat$tod),
+                    #frames=1)
+                    )
+      new.dat=cbind(new.dat,predict(Nb2,new.dat))
+      names(new.dat)[10]="Predicted"
+      resvec=summaryBy(Predicted~y,data=new.dat,FUN=mean)[,2]
+      return(resvec)
+    }  
+    resvec=rep(NA,numyrs)
+    return(resvec)
+  }
+  
+  #Call the getindex function for each bootstrap replicate
+  predmean.boot[boot,]=getindex()
+  index.boot[boot,]=predmean.boot[boot,]/mean(predmean.boot[boot,])
+}
+save.image("\\\\CCFHR-S-1534090\\popdyn1\\Purcell\\GrayTrigIndex_SEDAR41\\GrayTrig_VideoIndex.RData")
+```
+
+
+```{r indexFig, echo=FALSE, warning=FALSE, error=FALSE}
+
+#windows(width=8,height=6,record=T)
+medianidex=apply(predmean.boot[!is.na(predmean.boot[,1]),],2,quantile,c(0.5))
+plot(resvec)
+lines(medianidex)
+#exclude runs that did not converge and compute the convergence rate
+conv.index=index.boot[!is.na(index.boot[,1]),]
+convrate=dim(conv.index)[1]/dim(index.boot)[1]
+
+convrate
+
+#Calculate the CV by year
+
+#Make a data frame from the boot strap output
+cv.dat<-as.data.frame(index.boot)
+cv.dat2<-cv.dat[complete.cases(cv.dat),]
+
+# Make a function for coef vari
+co.var<- function(x) (sd(x)/mean(x))
+
+# Call co.var on each column of the bootstrap output df
+cv.2011<-co.var(cv.dat2$V1)  
+cv.2012<-co.var(cv.dat2$V2)
+cv.2013<-co.var(cv.dat2$V3)
+
+
+(proc.time() - ptm)[3]/60/60 #???
+#conv.index
+
+cI=apply(conv.index,2,quantile,c(0.025,0.5,0.975)) #97.5% CI
+#cI=apply(conv.index,2,quantile,c(0.05,0.5,0.95))  #95% CI
+nomcpue<-summaryBy(SumCount ~ y, dat=dat, FUN=mean)
+nomcpue.std <- nomcpue$SumCount.mean/mean(nomcpue$SumCount)
+nomcpue.std <- as.data.frame(nomcpue.std)
+
+
+matplot(t(cI),type='l',ylim=c(0,2.25),xaxt="n",col=c(1,2,1),lty=c(3,1,3),lwd=c(1,2,1),ylab='Relative CPUE')
+axis(1,at=1:3,labels=2011:2013)
+index = resvec/mean(resvec)
+#lines(index,type='l',ylim=c(0,2),col='green',lwd=2)
+lines(nomcpue.std$nomcpue.std, type='l', col='blue', lty=2,lwd=2)
+legend('topright',legend=c('Standardized Index ','Bootstrap CI','Nominal'),lty=c(1,3,2),col=c('red','black','blue'),lwd=c(2,1,2), cex=0.8, bty="n")
+
+# yrs=as.numeric(row.names(ds$deltaGLM.index))
+# errbar(x=yrs,y=U.std,yplus=U.std+1.96*error.std,yminus=U.std-1.96*error.std, ylab='Relative CPUE', xlab='Year', lwd=2, ylim=c(0,5))
+# grid(col="gray")
+# title(main="GOM Shrimp Abundance Index")
+# lines(yrs,U.std,lwd=2)
+# lines(yrs,nomcpue.std$nomcpue.std,lty=2, lwd=2)
+# legend("topleft", bg="white", legend=c("Standardized index","Nominal"),lwd=2, lty=1:2,pch=c(1,-1))
+```
+
+
+
+```{r, sessionInfo, echo=FALSE, warning=FALSE, error=FALSE, results='hide'}
+# produce R session info
+sessionInfo()
+
+save.image("\\\\CCFHR-S-1534090\\popdyn1\\Purcell\\GrayTrigIndex_SEDAR41\\GrayTrig_VideoIndex.RData")
+```
