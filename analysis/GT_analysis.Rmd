@@ -365,67 +365,63 @@ AIC(nbmod)-AIC(nbmod7)
 AIC(nbmod)-AIC(nbmod8)
 
 
+## SECOND ROUND ## --> MOVING TO LOGISTIC SIDE
+# nbmod is the best performing so start with that
 
-# nbmod is the best performing so step down to it
+# Remove wc from count
+nbform1=formula(SumCount~ y + wc + cd + sc + bd + d + t + lat + temp |y + cd + sc + bd + d + t + lat + temp )
+nbmod1=zeroinfl(nbform1,  dist = "negbin", link = "logit",data=dat);summary(nbmod1)
+# Remove cd from count
+nbform2=formula(SumCount~ y + wc + cd + sc + bd + d + t + lat + temp |y + wc + sc + bd + d + t + lat + temp )
+nbmod2=zeroinfl(nbform2,  dist = "negbin", link = "logit",data=dat);summary(nbmod2)
+# Remove sc from count
+nbform3=formula(SumCount~ y + wc + cd + sc + bd + d + t + lat + temp |y + wc + cd + bd + d + t + lat + temp )
+nbmod3=zeroinfl(nbform3,  dist = "negbin", link = "logit",data=dat);summary(nbmod3)
+# Remove bd from count
+nbform4=formula(SumCount~ y + wc + cd + sc + bd + d + t + lat + temp |y + wc + cd + sc + d + t + lat + temp )
+nbmod4=zeroinfl(nbform4,  dist = "negbin", link = "logit",data=dat);summary(nbmod4)
+# Remove d from count
+nbform5=formula(SumCount~ y + wc + cd + sc + bd + d + t + lat + temp |y + wc + cd + sc + bd + t + lat + temp )
+nbmod5=zeroinfl(nbform5,  dist = "negbin", link = "logit",data=dat);summary(nbmod5)
+# Remove t from count
+nbform6=formula(SumCount~ y + wc + cd + sc + bd + d + t + lat + temp |y + wc + cd + sc + bd + d + lat + temp )
+nbmod6=zeroinfl(nbform6,  dist = "negbin", link = "logit",data=dat);summary(nbmod6)
+# Remove lat from count
+nbform7=formula(SumCount~ y + wc + cd + sc + bd + d + t + lat + temp |y + wc + cd + sc + bd + d + t +  temp )
+nbmod7=zeroinfl(nbform7,  dist = "negbin", link = "logit",data=dat);summary(nbmod7)
+# Remove temp from count
+nbform8=formula(SumCount~ y + wc + cd + sc + bd + d + t + lat + temp |y + wc + cd + sc + bd + d + t + lat )
+nbmod8=zeroinfl(nbform8,  dist = "negbin", link = "logit",data=dat);summary(nbmod8)
+# Remove y from count
+nbform9=formula(SumCount~ y + wc + cd + sc + bd + d + t + lat + temp | wc + cd + sc + bd + d + t + lat + temp )
+nbmod9=zeroinfl(nbform9,  dist = "negbin", link = "logit",data=dat);summary(nbmod9)
 
-# NULL MODEL FORM
-#nbform=formula(SumCount~ y + wc + cd + sc + bd + d + t + lat + temp |y + wc + cd + sc + bd + d + t + lat + temp )
 
-###Remove water clarity and current variables from mean
-nbform3a=formula(SumCount~ y + cd + bd + d + t + lat + temp |y + wc + cd + sc + bd + d + t + lat + temp)
-nbmod9=zeroinfl(nbform3a,  dist = "negbin", link = "logit",data=dat)
-summary(nbmod9)
+lrtest(nbmod1,nbmod)
+lrtest(nbmod2,nbmod)
+lrtest(nbmod3,nbmod)
+lrtest(nbmod4,nbmod)
+lrtest(nbmod5,nbmod)
+lrtest(nbmod6,nbmod)
+lrtest(nbmod7,nbmod)
+lrtest(nbmod8,nbmod)
+lrtest(nbmod9,nbmod)
 
-nbform3b=formula(SumCount~ y + wc + bd + d + t + lat + temp |y + wc + cd + sc + bd + d + t + lat + temp)
-nbmod10=zeroinfl(nbform3b,  dist = "negbin", link = "logit",data=dat)
-summary(nbmod10)
+AIC(nbmod,nbmod1,nbmod2,nbmod3,nbmod4,
+    nbmod5,nbmod6,nbmod7,nbmod8,nbmod9)
 
-###Remove benthic variables from mean
-nbform3c=formula(SumCount~ y + wc + cd + d + t + lat + temp |y + wc + cd + sc + bd + d + t + lat + temp)
-nbmod11=zeroinfl(nbform3c,  dist = "negbin", link = "logit",data=dat)
-summary(nbmod11)
+AIC(nbmod)-AIC(nbmod1)
+AIC(nbmod)-AIC(nbmod2)
+AIC(nbmod)-AIC(nbmod3)
+AIC(nbmod)-AIC(nbmod4)
+AIC(nbmod)-AIC(nbmod5)
+AIC(nbmod)-AIC(nbmod6)
+AIC(nbmod)-AIC(nbmod7)
+AIC(nbmod)-AIC(nbmod8)
 
-nbform3d=formula(SumCount~ y + wc + cd + bd + t + lat + temp |y + wc + cd + sc + bd + d + t + lat + temp)
-nbmod12=zeroinfl(nbform3d,  dist = "negbin", link = "logit",data=dat)
-summary(nbmod12)
 
-###Remove depth from mean
-nbform3e=formula(SumCount~ y + wc + cd + bd + d + lat + temp |y + wc + cd + sc + bd + d + t + lat + temp)
-nbmod13=zeroinfl(nbform3e,  dist = "negbin", link = "logit",data=dat)
-summary(nbmod13)
 
-#### Remove Latitude From mean 
-nbform3f=formula(SumCount~ y + wc + cd + bd + d + t +  temp |y + wc + cd + sc + bd + d + t + lat + temp)
-nbmod14=zeroinfl(nbform3f,  dist = "negbin", link = "logit",data=dat)
-summary(nbmod14)
 
-#### Remove Temperature From mean 
-nbform3g=formula(SumCount~ y + wc + cd + bd + d + t + lat |y + wc + cd + sc + bd + d + t + lat + temp)
-nbmod15=zeroinfl(nbform3g,  dist = "negbin", link = "logit",data=dat)
-summary(nbmod15)
-
-lrtest(nbmod9,nbmod3)
-lrtest(nbmod10,nbmod3)
-lrtest(nbmod11,nbmod3)
-lrtest(nbmod12,nbmod3)
-lrtest(nbmod13,nbmod3)
-lrtest(nbmod14,nbmod3)
-lrtest(nbmod15,nbmod3)
-AIC(nbmod9)
-AIC(nbmod10)
-AIC(nbmod11)
-AIC(nbmod12)
-AIC(nbmod13)
-AIC(nbmod14)
-AIC(nbmod15)
-
-AIC(nbmod3)-AIC(nbmod9)
-AIC(nbmod3)-AIC(nbmod10)
-AIC(nbmod3)-AIC(nbmod11)
-AIC(nbmod3)-AIC(nbmod12)
-AIC(nbmod3)-AIC(nbmod13)
-AIC(nbmod3)-AIC(nbmod14)
-AIC(nbmod3)-AIC(nbmod15)
 
 ## nbmod3 needs no further removals from mean
 
