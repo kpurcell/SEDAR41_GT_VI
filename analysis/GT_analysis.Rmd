@@ -112,9 +112,6 @@ dat.2014<-subset(dat, dat$y==2014)
 stargazer(dat.2013, type='text')
 summaryBy(SumCount~y,data=dat,FUN=length)
 
-#rescale frames
-#dat$frames=dat$frames/41
-#dat$frames=log(dat$frames)
 ```
 
 
